@@ -1,0 +1,4 @@
+function constant(x) {
+return x;
+}
+constant(42);

@@ -1,4 +1,5 @@
 from lark import Lark, Transformer, Tree
+import sys
 
 # Gramática de CMPL
 cmpl_grammar = """
@@ -7,12 +8,13 @@ start: statement+
 statement: function_definition
          | conditional
          | loop
-         | print_statement
+         | print_statement 
          | return_statement
          | expression ";"
          | function_call ";"
 
-function_definition: "function" NAME "(" param_list ")" "{" statement+ "}"
+function_definition: "function" NAME "(" param_list ")" "{" statement* return_statement "}"
+ 
 param_list: (NAME ("," NAME)*)?
 
 function_call: NAME "(" arg_list ")"
@@ -28,6 +30,7 @@ loop: "for" NAME "in" "range" "(" NUMBER "," NUMBER "," NUMBER ")" "{" statement
 return_statement: "return" expression ";"
 
 expression: term (("+" | "-" | "%") term)*
+          | condition
 
 term: factor (("*" | "/" | "%") factor)*
 
@@ -49,18 +52,22 @@ NUMBER: /\d+/
 # Parser para CMPL
 parser = Lark(cmpl_grammar, start="start")
 
-# Programa de ejemplo
-program = """
-function suma(a, b) {
-    return a + b;
-}
+# Verificar si se pasó el nombre de archivo como argumento
+if len(sys.argv) != 2:
+    print("Uso: python cmpl_parser.py <archivo_de_entrada>")
+    sys.exit(1)
 
-for i in range(0, 10, 1) {
-    print(suma(i, i+1));  
-}
-"""
+input_file = sys.argv[1]
 
-# Imprimir el árbol
+# Leer el archivo de entrada
+try:
+    with open(input_file, "r") as f:
+        program = f.read()
+except FileNotFoundError:
+    print(f"Error: El archivo '{input_file}' no existe.")
+    sys.exit(1)
+
+# Imprimir el árbol de sintaxis generado
 tree = parser.parse(program)
 print("Árbol de sintaxis generado:")
 print(tree.pretty())
@@ -68,55 +75,67 @@ print(tree.pretty())
 class CMPLTransformer(Transformer):
     def __init__(self):
         self.output = []
-    
+        self.temp_counter = 0  # Contador para variables temporales
+
+    def get_temp(self):
+        temp = f"%t{self.temp_counter}"
+        self.temp_counter += 1
+        return temp
+
     def start(self, items):
-        self.output.append("; ModuleID = 'program'\n")
-        self.output.append("target triple = \"x86_64-pc-linux-gnu\"\n\n")
-        
-        # Convierte cada item en un string antes de agregarlo a la salida
+        # Asegurarnos de que todo en items se convierta a cadenas
         for item in items:
-            self.output.append(str(item))  # Convertir cada elemento a cadena
-
+            self.output.append(str(item))  # Convertir item a string aquí
         return "\n".join(self.output)
-    
+
     def function_definition(self, items):
-        function_name = str(items[0])  # Nombre de la función
-        params = items[1]  # Parámetros
-        body = "".join([str(item) for item in items[2:]])  # Extrae el texto de los statements
-        
-        # Construye la lista de parámetros como un string
-        param_list = ", ".join([f"i32 %{param}" for param in params.children])
-        return f"define dso_local i32 @{function_name}({param_list}) {{\n{body}  ret i32 0\n}}\n"
-    
+        function_name = str(items[0])  # Función (como @constant)
+        param_list = ', '.join([str(param) for param in items[1]])  # Parámetros
+        body = str(items[2])  # Cuerpo de la función
+        return f"define dso_local i32 @{function_name}({param_list}) {{\n  {body}\n}}"
+
     def return_statement(self, items):
-        return f"  ret i32 {items[0]}\n"
-    
-    def loop(self, items):
-        loop_var = items[0]
-        start = items[1]
-        end = items[2]
-        step = items[3]
-        body = "".join([str(item) for item in items[4:]])  # Extrae el texto de los statements
-        return f"""
-  ; Loop {loop_var}
-  br label %loop_start
+        value = str(items[0])  # Valor de retorno
+        return f"  ret i32 {value}"
 
-loop_start:
-  %0 = phi i32 [{start}, %entry], [%2, %loop_body]
-  %cond = icmp slt i32 %0, {end}
-  br i1 %cond, label %loop_body, label %loop_end
+    def function_call(self, items):
+        function_name = str(items[0])  # Función (como @constant)
+        
+        # Aquí procesamos los argumentos de forma similar
+        args = ", ".join([str(arg) for arg in items[1]])  # Argumentos
+        return f"  call i32 @{function_name}({args})"
 
-loop_body:
-{body}
-  %2 = add i32 %0, {step}
-  br label %loop_start
+    def expression(self, items):
+        if len(items) == 1:  # Caso de expresión simple
+            return str(items[0])
+        else:
+            left = str(items[0])
+            operator = str(items[1])
+            right = str(items[2])
 
-loop_end:
-"""
+            # Operadores mapeados a LLVM
+            llvm_op = {"+" : "add", "-" : "sub", "*" : "mul", "/" : "sdiv"}[operator]
+            temp = self.get_temp()
+            self.output.append(f"  {temp} = {llvm_op} i32 {left}, {right}")
+            return temp
 
-    def print_statement(self, items):
-        return f"  call void @print_int(i32 {items[0]})\n"
+    def NAME(self, token):
+        return str(token)
 
+    def NUMBER(self, token):
+        return str(token)
+
+    def param_list(self, items):
+        return items
+
+    def arg_list(self, items):
+        return items
+
+    def term(self, items):
+        return str(items[0])  # Devolver el valor procesado
+
+    def factor(self, items):
+        return str(items[0])  # Devolver el valor procesado
 
 
 # Generar el código LLVM

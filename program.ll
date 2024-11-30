@@ -1,2 +1,5 @@
-Tree(Token('RULE', 'statement'), ['define dso_local i32 @constant(x) {\n    ret i32 x\n}'])
-Tree(Token('RULE', 'statement'), ['  call i32 @constant(42)'])
+define dso_local i32 @main() {
+  ret i32 1
+  ret i32 0
+}
+define dso_local i32 @suma(i32 %a, i32 %b) {

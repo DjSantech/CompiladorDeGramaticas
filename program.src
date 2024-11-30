@@ -1,4 +1,7 @@
-function constant(x) {
-return x;
+function main (){
+    return 1;
 }
-constant(42);
+
+function suma (a,b){
+    return a + b;
+}
